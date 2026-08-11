@@ -17,6 +17,10 @@ export interface DragCurrent {
   previouslySelected?: cg.Key;
   originTarget: EventTarget | null;
   keyHasChanged: boolean; // whether the drag has left the orig key
+  // a processDrag rAF loop is running; prevents queueing multiple loops per frame
+  dragging?: boolean;
+  // last pointer position processed, to stop the loop when the pointer is still
+  lastProcessed?: cg.NumberPair;
 }
 
 export function start(s: State, e: cg.MouchEvent): void {
@@ -117,9 +121,16 @@ export function dragNewPiece(s: State, piece: cg.Piece, e: cg.MouchEvent, force?
 }
 
 function processDrag(s: State): void {
+  const cur = s.draggable.current;
+  if (!cur || cur.dragging) return;
+  cur.dragging = true;
   requestAnimationFrame(() => {
-    const cur = s.draggable.current;
-    if (!cur) return;
+    cur.dragging = false;
+    if (s.draggable.current !== cur) return; // drag ended since this frame was queued
+    // nothing moved since the last frame: stop the loop until the next move event
+    if (cur.lastProcessed && cur.pos[0] === cur.lastProcessed[0] && cur.pos[1] === cur.lastProcessed[1])
+      return;
+    cur.lastProcessed = cur.pos;
     // cancel animations while dragging
     if (s.animation.current?.plan.anims.has(cur.orig)) s.animation.current = undefined;
     // if moving piece is gone, cancel
@@ -188,6 +199,7 @@ export function move(s: State, e: cg.MouchEvent): void {
   // support one finger touch only
   if (s.draggable.current && (!e.touches || e.touches.length < 2)) {
     s.draggable.current.pos = util.eventPosition(e)!;
+    processDrag(s); // restart the loop after a pointer move
   }
 }
 
